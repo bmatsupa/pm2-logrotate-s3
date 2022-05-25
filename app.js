@@ -8,6 +8,8 @@ const zlib      = require('zlib');
 const deepExtend = require('deep-extend');	
 const publicIp = require('public-ip');
 const s3 = require('s3-node');
+const os = require("os");
+
 
 var conf = pmx.initModule({
   widget : {
@@ -31,6 +33,7 @@ var conf = pmx.initModule({
 var PM2_ROOT_PATH = '';
 var Probe = pmx.probe();
 var SERVER_PUBLIC_IP;
+var SERVER_HOSTNAME; 
 
 if (process.env.PM2_HOME)
   PM2_ROOT_PATH = process.env.PM2_HOME;
@@ -44,6 +47,17 @@ try {
   conf = deepExtend(conf, customConfig);
 } catch (error) {
   console.error('deepExtend pm2-logrotate-s3-config.json ERROR: ', error);
+}
+
+
+if (conf && conf.serverHostname) {
+  SERVER_HOSTNAME = conf.serverHostname;
+  console.log('CONF SERVER_HOSTNAME: ', SERVER_HOSTNAME);
+} 
+else  
+{
+  SERVER_HOSTNAME = os.hostname();
+  console.log('ENV SERVER_HOSTNAME: ', SERVER_HOSTNAME);
 }
 
 if (process.env.SERVER_PUBLIC_IP && typeof process.env.SERVER_PUBLIC_IP === 'string') {
@@ -69,8 +83,13 @@ if (!conf.aws || !conf.aws.credentials || !conf.aws.credentials.accessKeyId || !
   return console.error('Not found aws credentials --> pm2-logrotate-s3-config.json in PM2 home folder');
 }
 
+if (!conf.aws || !conf.aws.credentials || !conf.aws.credentials.region ) {
+  return console.error('Not found aws region --> pm2-logrotate-s3-config.json in PM2 home folder');
+}
+
 const s3client = s3.createClient({
   s3Options: {
+    region: conf.aws.credentials.region,
     accessKeyId: conf.aws.credentials.accessKeyId,
     secretAccessKey: conf.aws.credentials.secretAccessKey,
   },
@@ -136,8 +155,9 @@ function putOldFileToS3AndDeletedFromLocal(file) {
         const moment_date = moment();
         const s3_file_path = `${conf.logBucketSetting.s3Path}/${(conf.logBucketSetting.s3FilePathFormat || '__filename__')
           .replace(/__ip__/, SERVER_PUBLIC_IP || '')
+          .replace(/__hostname__/, SERVER_HOSTNAME )
           .replace(/__year__/, moment_date.format('YYYY'))
-          .replace(/__month__/, moment_date.format('MMM'))
+          .replace(/__month__/, moment_date.format('MM'))
           .replace(/__day__/, moment_date.format('DD'))
           .replace(/__filename__/, rotated_files[i])
           .replace(/__epoch__/, moment_date.toDate().getTime())
@@ -287,6 +307,7 @@ pm2.connect(function(err) {
     // rotate pm2 log
     proceed_file(PM2_ROOT_PATH + '/pm2.log', false);
     proceed_file(PM2_ROOT_PATH + '/agent.log', false);
+    proceed_file(PM2_ROOT_PATH + '/logs/.log', false);
   }, WORKER_INTERVAL);
 
   // register the cron to force rotate file
